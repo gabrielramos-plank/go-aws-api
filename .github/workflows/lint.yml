@@ -1,0 +1,44 @@
+name: Lint
+
+# Static checks: fast feedback on every PR, and reused by deploy.yml as a gate.
+on:
+  pull_request:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: golangci-lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      # Linters and formatters (gofmt, goimports) are configured in .golangci.yml.
+      - uses: golangci/golangci-lint-action@v8
+        with:
+          version: latest
+
+  typecheck:
+    name: Typecheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: go.mod / go.sum are tidy
+        run: |
+          go mod tidy
+          git diff --exit-code go.mod go.sum
+
+      # Compiles every package; go vet also type-checks test files.
+      - run: go build ./...
+      - run: go vet ./...

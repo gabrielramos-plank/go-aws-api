@@ -8,9 +8,10 @@ on:
 permissions:
   contents: read
 
+# Lint and typecheck live in lint.yml.
 jobs:
-  go:
-    name: Go – vet, test, build
+  test:
+    name: Go tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -20,21 +21,7 @@ jobs:
           go-version-file: go.mod
 
       - run: go mod verify
-      - run: go vet ./...
       - run: go test -race -count=1 ./...
-      - run: go build ./...
-
-  lint:
-    name: golangci-lint
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-      - uses: golangci/golangci-lint-action@v8
-        with:
-          version: latest
 
   docker:
     name: Docker build (no push)

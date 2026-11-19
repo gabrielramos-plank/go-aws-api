@@ -30,11 +30,14 @@ env:
   CONTAINER_NAME: api
 
 jobs:
+  lint:
+    uses: ./.github/workflows/lint.yml
+
   ci:
     uses: ./.github/workflows/ci.yml
 
   deploy:
-    needs: ci
+    needs: [lint, ci]
     runs-on: ubuntu-latest
     environment: production
     steps:

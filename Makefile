@@ -1,4 +1,4 @@
-.PHONY: run test lint up down tf-fmt tf-bootstrap tf-plan tf-apply tf-destroy
+.PHONY: run test lint typecheck check up down tf-fmt tf-bootstrap tf-plan tf-apply tf-destroy
 
 DATABASE_URL ?= postgres://app:app@localhost:5432/app?sslmode=disable
 
@@ -11,6 +11,11 @@ test:
 
 lint:
 	golangci-lint run
+
+typecheck:
+	go build ./... && go vet ./...
+
+check: lint typecheck test   ## Everything CI checks, locally
 
 up:             ## Start API + Postgres in Docker
 	docker compose up --build

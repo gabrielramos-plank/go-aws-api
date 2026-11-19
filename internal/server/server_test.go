@@ -33,7 +33,7 @@ func newTestServer() http.Handler {
 
 func TestHealth(t *testing.T) {
 	rec := httptest.NewRecorder()
-	newTestServer().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/health", nil))
+	newTestServer().ServeHTTP(rec, httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/health", nil))
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
@@ -54,7 +54,7 @@ func TestCreateItem(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			rec := httptest.NewRecorder()
-			req := httptest.NewRequest(http.MethodPost, "/api/v1/items", strings.NewReader(tt.body))
+			req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/items", strings.NewReader(tt.body))
 			newTestServer().ServeHTTP(rec, req)
 
 			if rec.Code != tt.want {
@@ -66,7 +66,7 @@ func TestCreateItem(t *testing.T) {
 
 func TestListItemsEmptyReturnsArray(t *testing.T) {
 	rec := httptest.NewRecorder()
-	newTestServer().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/items", nil))
+	newTestServer().ServeHTTP(rec, httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/items", nil))
 
 	if got := strings.TrimSpace(rec.Body.String()); got != "[]" {
 		t.Fatalf("body = %q, want []", got)
