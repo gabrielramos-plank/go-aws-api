@@ -1,21 +1,49 @@
 package server
 
 import (
+	"context"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"go-aws-api/internal/httpx"
 	"go-aws-api/internal/items"
 )
 
-func New(logger *slog.Logger, repo items.Repository) http.Handler {
+// Pinger reports whether a dependency is reachable. *pgxpool.Pool satisfies it.
+type Pinger interface {
+	Ping(ctx context.Context) error
+}
+
+func New(logger *slog.Logger, repo items.Repository, db Pinger) http.Handler {
 	mux := http.NewServeMux()
 
 	// The ALB target group health check hits this. It deliberately does not
 	// check the database, so a slow DB doesn't make ECS kill healthy tasks.
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, _ *http.Request) {
 		httpx.WriteJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+	})
+
+	// Readiness: unlike /health, this checks the database so operators and
+	// monitors can tell whether the API can actually serve requests.
+	mux.HandleFunc("GET /ready", func(w http.ResponseWriter, r *http.Request) {
+		ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+		defer cancel()
+		if err := db.Ping(ctx); err != nil {
+			logger.Warn("readiness check failed", "error", err)
+			httpx.WriteJSON(w, http.StatusServiceUnavailable, map[string]string{"status": "unavailable", "database": "down"})
+			return
+		}
+		httpx.WriteJSON(w, http.StatusOK, map[string]string{"status": "ok", "database": "up"})
+	})
+
+	mux.HandleFunc("GET /api/v1/hello", func(w http.ResponseWriter, r *http.Request) {
+		msg := "Hello World"
+		if name := strings.TrimSpace(r.URL.Query().Get("name")); name != "" {
+			msg += ", " + name
+		}
+		httpx.WriteJSON(w, http.StatusOK, map[string]string{"message": msg})
 	})
 
 	items.NewHandler(repo, logger).Register(mux)

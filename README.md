@@ -25,6 +25,8 @@ GitHub Actions      → CI on PRs, deploy on push to main, Terraform on demand
 | Method | Path            | Description                      |
 |--------|-----------------|----------------------------------|
 | GET    | `/health`       | Liveness (ALB health check only) |
+| GET    | `/ready`        | Readiness: 503 if the DB is down |
+| GET    | `/api/v1/hello` | Greeting; optional `?name=...`   |
 | GET    | `/api/v1/items` | List the latest 100 items        |
 | POST   | `/api/v1/items` | Create an item: `{"name":"..."}` |
 
