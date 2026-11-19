@@ -1,0 +1,90 @@
+name: Deploy
+
+# Every push to main: run CI → build arm64 image → push to ECR →
+# register a new ECS task definition revision → roll the service.
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - "infra/**"
+      - "examples/**"
+      - "**.md"
+  workflow_dispatch:
+
+# Never run two deploys at once; queue them instead of cancelling mid-rollout.
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+permissions:
+  id-token: write # OIDC → AWS, no stored access keys
+  contents: read
+
+env:
+  AWS_REGION: ${{ vars.AWS_REGION }}
+  # Must match `project` in infra/ (default "go-aws-api").
+  ECR_REPOSITORY: go-aws-api
+  ECS_CLUSTER: go-aws-api-cluster
+  ECS_SERVICE: go-aws-api-service
+  TASK_FAMILY: go-aws-api-api
+  CONTAINER_NAME: api
+
+jobs:
+  ci:
+    uses: ./.github/workflows/ci.yml
+
+  deploy:
+    needs: ci
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build and push image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/arm64
+          push: true
+          tags: |
+            ${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ github.sha }}
+            ${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # Start from the latest revision Terraform registered (env vars, secrets,
+      # roles) and only swap the image. Terraform owns config, CI owns the image.
+      - name: Download current task definition
+        run: |
+          aws ecs describe-task-definition \
+            --task-definition "$TASK_FAMILY" \
+            --query taskDefinition > task-definition.json
+
+      - id: render
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        with:
+          task-definition: task-definition.json
+          container-name: ${{ env.CONTAINER_NAME }}
+          image: ${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ github.sha }}
+
+      - name: Deploy to ECS
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v2
+        with:
+          task-definition: ${{ steps.render.outputs.task-definition }}
+          cluster: ${{ env.ECS_CLUSTER }}
+          service: ${{ env.ECS_SERVICE }}
+          wait-for-service-stability: true
+
+      - name: Summary
+        run: |
+          echo "### Deployed \`${GITHUB_SHA::7}\` to \`$ECS_SERVICE\`" >> "$GITHUB_STEP_SUMMARY"

@@ -1,0 +1,69 @@
+# Copy to .github/workflows/deploy.yml in your FE repo.
+#
+# FE repo setup:
+#   - Settings → Environments: create `production`
+#   - Variables: AWS_REGION, AWS_FRONTEND_ROLE_ARN, FRONTEND_BUCKET (bootstrap outputs)
+#   - Call the API with relative URLs (fetch("/api/v1/items")): same origin, no CORS.
+#     For local dev, proxy /api to http://localhost:8080 (e.g. Vite `server.proxy`).
+
+name: Deploy frontend
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-frontend
+  cancel-in-progress: false
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  BUILD_DIR: dist # Vite → dist, Create React App → build
+  PROJECT: go-aws-api # the CloudFront distribution's comment
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+      - run: npm run build
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_FRONTEND_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      # Hashed assets can be cached forever; index.html must always be revalidated
+      # so users pick up new deploys.
+      - name: Upload to S3
+        run: |
+          aws s3 sync "$BUILD_DIR" "s3://${{ vars.FRONTEND_BUCKET }}" --delete \
+            --exclude index.html --cache-control "public,max-age=31536000,immutable"
+          aws s3 cp "$BUILD_DIR/index.html" "s3://${{ vars.FRONTEND_BUCKET }}/index.html" \
+            --cache-control "no-cache"
+
+      # The distribution is recreated with the app stack, so look it up by comment
+      # instead of hardcoding its ID. Skip if the infra is currently destroyed.
+      - name: Invalidate CloudFront
+        run: |
+          id=$(aws cloudfront list-distributions \
+            --query "DistributionList.Items[?Comment=='$PROJECT'].Id | [0]" --output text)
+          if [ "$id" = "None" ] || [ -z "$id" ]; then
+            echo "No distribution found (infra destroyed?); files are uploaded for next time."
+            exit 0
+          fi
+          aws cloudfront create-invalidation --distribution-id "$id" --paths "/index.html"
+          domain=$(aws cloudfront get-distribution --id "$id" --query Distribution.DomainName --output text 2>/dev/null || true)
+          echo "### Deployed to https://$domain" >> "$GITHUB_STEP_SUMMARY"

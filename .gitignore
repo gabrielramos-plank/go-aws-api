@@ -1,0 +1,17 @@
+# Go
+/bin/
+*.test
+*.out
+
+# Env
+.env
+
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example
+backend.hcl
+tfplan
+crash.log

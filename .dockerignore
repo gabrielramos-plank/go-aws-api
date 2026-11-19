@@ -1,0 +1,8 @@
+.git
+.github
+infra
+examples
+bin
+*.md
+.env
+docker-compose.yml

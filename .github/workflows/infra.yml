@@ -1,0 +1,76 @@
+name: Infrastructure
+
+# Manually plan / apply / destroy the app stack (infra/app).
+# Typical study loop: `apply` when you start, `destroy` when you're done.
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: Terraform action
+        type: choice
+        options: [plan, apply, destroy]
+        default: plan
+  # Optional safety net for your credits: uncomment to destroy every night
+  # at 03:00 UTC in case you forget.
+  # schedule:
+  #   - cron: "0 3 * * *"
+
+concurrency:
+  group: terraform-app
+  cancel-in-progress: false
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  terraform:
+    runs-on: ubuntu-latest
+    environment: infrastructure
+    defaults:
+      run:
+        working-directory: infra/app
+    env:
+      ACTION: ${{ github.event_name == 'schedule' && 'destroy' || inputs.action }}
+      TF_IN_AUTOMATION: "true"
+      TF_VAR_aws_region: ${{ vars.AWS_REGION }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_TERRAFORM_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+
+      - name: Init
+        run: |
+          terraform init -input=false \
+            -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}" \
+            -backend-config="key=app/terraform.tfstate" \
+            -backend-config="region=${{ vars.AWS_REGION }}" \
+            -backend-config="use_lockfile=true"
+
+      - name: Plan
+        run: |
+          flags=""
+          if [ "$ACTION" = "destroy" ]; then flags="-destroy"; fi
+          terraform plan -input=false $flags -out=tfplan
+          terraform show -no-color tfplan > plan.txt
+          {
+            echo "### Terraform $ACTION plan"
+            echo '```'
+            tail -c 60000 plan.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Apply
+        if: env.ACTION != 'plan'
+        run: terraform apply -input=false tfplan
+
+      - name: Outputs
+        if: env.ACTION == 'apply'
+        run: terraform output
